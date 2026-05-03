@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Search, Info, Armchair } from 'lucide-react-native';
+import { ArrowLeft, Search, Info, Armchair, Receipt } from 'lucide-react-native';
 import Animated, { FadeInDown, FadeInUp, SlideInDown, SlideOutDown } from 'react-native-reanimated';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { useTableStore } from '../../store/tableStore';
+import { useOrderStore } from '../../store/orderStore';
 
 const { width } = Dimensions.get('window');
 
-type TableStatus = 'available' | 'occupied' | 'ordered';
+type TableStatus = 'available' | 'occupied' | 'ordered' | 'eating';
 
 interface TableDef {
   id: string;
@@ -16,19 +18,6 @@ interface TableDef {
   zone: 'Main Dining' | 'Outdoor Patio';
   shape: 'rect' | 'circle' | 'rect-vertical';
 }
-
-const INITIAL_TABLES: Record<string, TableStatus> = {
-  'T1': 'available',
-  'T2': 'available',
-  'T3': 'available',
-  'T4': 'available',
-  'T5': 'available',
-  'T6': 'available',
-  'T7': 'available',
-  'T8': 'available',
-  'T9': 'available',
-  'T10': 'available',
-};
 
 const TABLES: TableDef[] = [
   { id: 'T1', name: 'T1', seats: 4, zone: 'Main Dining', shape: 'rect' },
@@ -46,8 +35,19 @@ const TABLES: TableDef[] = [
 export default function OrdersScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  
-  const [tableStatus, setTableStatus] = useState<Record<string, TableStatus>>(INITIAL_TABLES);
+
+  // ── Store ────────────────────────────────────────────────────
+  const { tables, fetchTables, assignTable, markOrdered, subscribeToRealtime } = useTableStore();
+  const { activeOrders, fetchActiveOrders } = useOrderStore();
+
+  // Derive a status map from the store tables array
+  const tableStatus = React.useMemo(() => {
+    const map: Record<string, TableStatus> = {};
+    tables.forEach(t => { map[t.id] = t.status as TableStatus; });
+    return map;
+  }, [tables]);
+
+  // Local UI state
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -57,35 +57,36 @@ export default function OrdersScreen() {
 
   const [animationKey, setAnimationKey] = useState(0);
 
-  // Trigger re-entry animations when the tab is focused
+  // Fetch tables + subscribe to realtime on focus
   useFocusEffect(
     React.useCallback(() => {
+      fetchTables();
+      fetchActiveOrders();
       setAnimationKey(prev => prev + 1);
+      const unsubscribe = subscribeToRealtime();
+      return unsubscribe;
     }, [])
   );
 
+  // Handle param-based orderedTableId (from make-order navigation)
   React.useEffect(() => {
     if (params.orderedTableId) {
-      setTableStatus(prev => ({
-        ...prev,
-        [params.orderedTableId as string]: 'ordered'
-      }));
+      markOrdered(params.orderedTableId as string);
       setSelectedTableId(null);
     }
   }, [params.orderedTableId]);
 
   const selectedTable = TABLES.find(t => t.id === selectedTableId);
-  const isSelectedOccupied = selectedTableId ? tableStatus[selectedTableId] === 'occupied' || tableStatus[selectedTableId] === 'ordered' : false;
+  const isSelectedOccupied = selectedTableId
+    ? tableStatus[selectedTableId] === 'occupied' || tableStatus[selectedTableId] === 'ordered' || tableStatus[selectedTableId] === 'eating'
+    : false;
   const isSelectedOrdered = selectedTableId ? tableStatus[selectedTableId] === 'ordered' : false;
+  const isSelectedEating = selectedTableId ? tableStatus[selectedTableId] === 'eating' : false;
+  const currentOrder = activeOrders.find(o => o.table_id === selectedTableId);
 
   const handleAssignTable = () => {
     if (!selectedTableId) return;
-    
-    setTableStatus(prev => ({
-      ...prev,
-      [selectedTableId]: 'occupied'
-    }));
-    
+    assignTable(selectedTableId);
     showToast('Table assigned. Proceed to order.');
   };
 
@@ -307,21 +308,46 @@ export default function OrdersScreen() {
               styles.infoText, 
               { color: isSelectedOccupied ? '#ef4444' : '#64748b' }
             ]}>
-              {isSelectedOrdered 
-                ? "Table order has been submitted to kitchen. Order cannot be modified."
-                : isSelectedOccupied 
-                  ? "Table is currently occupied. You can append orders to this table." 
-                  : "Table is available. Assign it to start taking orders."}
+              {isSelectedEating
+                ? "Table is currently being used (people are eating)."
+                : isSelectedOrdered 
+                  ? "Table order has been submitted to kitchen."
+                  : isSelectedOccupied 
+                    ? "Table is currently occupied. You can append orders to this table." 
+                    : "Table is available. Assign it to start taking orders."}
             </Text>
           </View>
 
+          {isSelectedOrdered && currentOrder && (
+            <View style={styles.orderSummaryBox}>
+              <View style={styles.orderSummaryHeader}>
+                <Receipt size={18} color="#db8221" />
+                <Text style={styles.orderSummaryTitle}>Active Order Summary</Text>
+              </View>
+              <View style={styles.orderSummaryList}>
+                {currentOrder.items.map((item, idx) => (
+                  <View key={idx} style={styles.orderSummaryItemRow}>
+                    <Text style={styles.orderSummaryItemQty}>{item.qty}x</Text>
+                    <Text style={styles.orderSummaryItemName} numberOfLines={1}>{item.name}</Text>
+                    <Text style={styles.orderSummaryItemPrice}>Ksh {item.unit_price * item.qty}</Text>
+                  </View>
+                ))}
+              </View>
+              <View style={styles.orderSummaryDivider} />
+              <View style={styles.orderSummaryTotalRow}>
+                <Text style={styles.orderSummaryTotalLabel}>Total</Text>
+                <Text style={styles.orderSummaryTotalAmount}>Ksh {currentOrder.total_amount}</Text>
+              </View>
+            </View>
+          )}
+
           <View style={styles.actionButtonsRow}>
             <TouchableOpacity 
-              style={[styles.actionButton, styles.makeOrderBtn, (!isSelectedOccupied || isSelectedOrdered) && styles.btnDisabled]}
-              disabled={!isSelectedOccupied || isSelectedOrdered}
+              style={[styles.actionButton, styles.makeOrderBtn, (!isSelectedOccupied || isSelectedOrdered || isSelectedEating) && styles.btnDisabled]}
+              disabled={!isSelectedOccupied || isSelectedOrdered || isSelectedEating}
               onPress={() => router.push({ pathname: '/make-order', params: { tableId: selectedTable.id } })}
             >
-              <Text style={[styles.actionButtonText, (!isSelectedOccupied || isSelectedOrdered) && styles.btnTextDisabled]}>
+              <Text style={[styles.actionButtonText, (!isSelectedOccupied || isSelectedOrdered || isSelectedEating) && styles.btnTextDisabled]}>
                 {isSelectedOrdered ? 'Order Submitted' : 'Make Order'}
               </Text>
             </TouchableOpacity>
@@ -626,6 +652,69 @@ const styles = StyleSheet.create({
     fontFamily: 'LexendBold',
     fontSize: 15,
     color: '#705f55',
+  },
+  orderSummaryBox: {
+    backgroundColor: '#fffaf5',
+    borderWidth: 1,
+    borderColor: '#fce3c5',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+  },
+  orderSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
+  orderSummaryTitle: {
+    fontFamily: 'LexendBold',
+    fontSize: 14,
+    color: '#db8221',
+  },
+  orderSummaryList: {
+    gap: 8,
+  },
+  orderSummaryItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  orderSummaryItemQty: {
+    fontFamily: 'LexendBold',
+    fontSize: 13,
+    color: '#8a7465',
+    width: 30,
+  },
+  orderSummaryItemName: {
+    fontFamily: 'Lexend',
+    fontSize: 13,
+    color: '#1c120f',
+    flex: 1,
+  },
+  orderSummaryItemPrice: {
+    fontFamily: 'LexendSemiBold',
+    fontSize: 13,
+    color: '#1c120f',
+  },
+  orderSummaryDivider: {
+    height: 1,
+    backgroundColor: '#fce3c5',
+    marginVertical: 12,
+  },
+  orderSummaryTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  orderSummaryTotalLabel: {
+    fontFamily: 'LexendBold',
+    fontSize: 14,
+    color: '#1c120f',
+  },
+  orderSummaryTotalAmount: {
+    fontFamily: 'LexendBold',
+    fontSize: 16,
+    color: '#db8221',
   },
   toastContainer: {
     position: 'absolute',

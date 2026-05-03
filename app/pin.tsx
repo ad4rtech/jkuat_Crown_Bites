@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Alert, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Alert, Image, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Briefcase, Coffee, ChefHat, CreditCard, ScanFace, Delete } from 'lucide-react-native';
+import { ArrowLeft, Briefcase, Coffee, ChefHat, CreditCard, HelpCircle, Delete } from 'lucide-react-native';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
+import { supabase } from '../lib/supabase';
+import CenterToast, { useToast } from '../components/CenterToast';
 
 const { width } = Dimensions.get('window');
 
@@ -31,27 +33,72 @@ export default function PinScreen() {
   const insets = useSafeAreaInsets();
   const { role } = useLocalSearchParams();
   const [pin, setPin] = useState('');
+  const { toast, show, confirm } = useToast();
 
   const currentRole = typeof role === 'string' && ROLE_INFO[role] ? ROLE_INFO[role] : ROLE_INFO['manager'];
   const RoleIcon = currentRole.icon;
+  const roleStr = typeof role === 'string' ? role : 'manager';
+
+  const [expectedPin, setExpectedPin] = useState(currentRole.pin);
+  const [loadingPin, setLoadingPin] = useState(true);
 
   useEffect(() => {
-    if (pin.length === 4) {
-      if (pin === currentRole.pin) {
-        // Correct pin, navigate to dashboard
+    async function fetchPin() {
+      try {
+        const fetchRole = typeof role === 'string' ? role : 'manager';
+        const { data, error } = await supabase
+          .from('role_auth')
+          .select('pin')
+          .eq('role', fetchRole)
+          .single();
+          
+        if (data && !error) {
+          setExpectedPin(data.pin);
+        }
+      } catch (err) {
+        console.error('Error fetching pin:', err);
+      } finally {
+        setLoadingPin(false);
+      }
+    }
+    fetchPin();
+  }, [role]);
+
+  useEffect(() => {
+    if (pin.length === 4 && !loadingPin) {
+      if (pin === expectedPin) {
+        // Show login success toast then navigate
+        show({
+          message: 'Logged in successfully!',
+          subMessage: `Welcome, ${currentRole.title}`,
+          type: 'success',
+          autoDismissMs: 1500,
+        });
         setTimeout(() => {
-          router.replace('/(tabs)');
-        }, 100);
+          if (role === 'kitchen') {
+            router.replace('/kitchen' as any);
+          } else if (role === 'manager') {
+            router.replace('/manager' as any);
+          } else if (role === 'cashier') {
+            router.replace('/cashier' as any);
+          } else {
+            router.replace('/(tabs)');
+          }
+        }, 1600);
       } else {
-        // Incorrect pin, alert and reset
+        // Incorrect pin — show centered toast then reset
         setTimeout(() => {
-          Alert.alert('Incorrect PIN', 'The PIN you entered is incorrect. Please try again.', [
-            { text: 'OK', onPress: () => setPin('') }
-          ]);
+          show({
+            message: 'Incorrect PIN',
+            subMessage: 'The PIN you entered is incorrect. Please try again.',
+            type: 'error',
+            autoDismissMs: 2500,
+          });
+          setPin('');
         }, 100);
       }
     }
-  }, [pin]);
+  }, [pin, expectedPin, loadingPin]);
 
   const handleKeyPress = (val: string) => {
     if (pin.length < 4) {
@@ -63,9 +110,56 @@ export default function PinScreen() {
     setPin((prev) => prev.slice(0, -1));
   };
 
+  const handleForgotPassword = () => {
+    if (roleStr === 'manager') {
+      show({
+        message: 'Contact Database Administrator',
+        subMessage: 'Please reach out to your system administrator to reset your PIN.',
+        type: 'info',
+        autoDismissMs: 4000,
+      });
+    } else {
+      confirm({
+        message: 'Forgot PIN',
+        subMessage: `Send a notification to the Restaurant Manager requesting a PIN reset for the ${currentRole.title} role?`,
+        confirmLabel: 'Send Request',
+        onConfirm: async () => {
+          try {
+            const { error } = await supabase.from('notifications').insert({
+              target_role: 'Manager',
+              title: 'PIN Reset Request',
+              message: `The ${currentRole.title} is requesting a PIN reset.`,
+              type: 'warning',
+              is_read: false
+            });
+            
+            if (error) throw error;
+            
+            show({
+              message: 'Message Sent',
+              subMessage: 'The Restaurant Manager has been notified.',
+              type: 'success',
+              autoDismissMs: 3000,
+            });
+          } catch (err) {
+            console.error('Failed to send pin reset request:', err);
+            show({
+              message: 'Failed to send',
+              subMessage: 'Could not send the notification right now.',
+              type: 'error',
+              autoDismissMs: 3000,
+            });
+          }
+        }
+      });
+    }
+  };
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}>
-      
+
+      <CenterToast {...toast} />
+
       {/* Back Button */}
       <Animated.View entering={FadeInDown.delay(100).duration(500)}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -134,8 +228,8 @@ export default function PinScreen() {
           ))}
         </View>
         <View style={styles.row}>
-          <TouchableOpacity style={styles.actionButton} onPress={() => {/* Biometric Auth Logic */}}>
-            <ScanFace color="#ffffff" size={28} />
+          <TouchableOpacity style={styles.actionButton} onPress={handleForgotPassword}>
+            <HelpCircle color="#ffffff" size={28} />
           </TouchableOpacity>
           <TouchableOpacity style={[styles.keyButton, { backgroundColor: '#1f1310' }]} onPress={() => handleKeyPress('0')}>
             <Text style={styles.keyText}>0</Text>

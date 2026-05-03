@@ -49,6 +49,9 @@ export default function RootLayout() {
         <Stack.Screen name="roles" options={{ headerShown: false, animation: 'fade' }} />
         <Stack.Screen name="pin" options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="kitchen"  options={{ headerShown: false, animation: 'fade' }} />
+        <Stack.Screen name="manager"  options={{ headerShown: false, animation: 'fade' }} />
+        <Stack.Screen name="cashier"  options={{ headerShown: false, animation: 'fade' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       <StatusBar style="auto" />
