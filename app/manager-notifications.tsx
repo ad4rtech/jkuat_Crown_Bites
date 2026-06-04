@@ -46,6 +46,7 @@ export default function ManagerNotificationsScreen() {
           <X size={22} color="#1c120f" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Manager Alerts {unreadCount > 0 && `(${unreadCount})`}</Text>
+        <View style={styles.closeBtn} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -106,6 +107,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginBottom: 24,
   },
+  headerTitle: {
+    fontFamily: 'LexendBold',
+    fontSize: 20,
+    color: '#1c120f',
+    textAlign: 'center',
+    flex: 1,
+  },
   closeBtn: {
     width: 44,
     height: 44,
@@ -114,11 +122,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerTitle: {
-    fontFamily: 'LexendBold',
-    fontSize: 20,
-    color: '#1c120f',
-  },
+
   scrollContent: {
     paddingHorizontal: 20,
     paddingBottom: 40,

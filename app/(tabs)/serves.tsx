@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { User, Bell, CheckCircle2, Clock, Flame, Utensils, Armchair, BellRing, ChevronLeft } from 'lucide-react-native';
 import Animated, { FadeInDown, Layout, SlideOutRight } from 'react-native-reanimated';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useOrderStore, ActiveOrderWithItems } from '../../store/orderStore';
+import { useNotificationStore } from '../../store/notificationStore';
 import { formatTimeAgo } from '../../lib/timeFormat';
 
 type OrderStatus = 'Ready' | 'In Prep' | 'Pending';
@@ -12,15 +13,17 @@ type OrderStatus = 'Ready' | 'In Prep' | 'Pending';
 export default function ServesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { activeOrders, ordersLoading, fetchActiveOrders, subscribeToOrders, markServed, freeTable } = useOrderStore();
+  const { activeOrders, ordersLoading, fetchActiveOrders, subscribeToOrders, markServed, freeTable, clearStuckOrders } = useOrderStore();
+  const { unreadCount, initStore } = useNotificationStore();
   const [activeFilter, setActiveFilter] = useState<string>('All');
   const [animationKey, setAnimationKey] = useState(0);
+  const [clearing, setClearing] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       fetchActiveOrders();
+      initStore('Waiter');
       setAnimationKey(prev => prev + 1);
-      // Subscribe to realtime, get unsubscribe function back
       const unsubscribe = subscribeToOrders();
       return unsubscribe;
     }, [])
@@ -166,7 +169,11 @@ export default function ServesScreen() {
         <Text style={styles.headerTitle}>Active Orders</Text>
         <TouchableOpacity style={styles.iconButton} onPress={() => router.push('/notifications')}>
           <Bell size={22} color="#1c120f" />
-          {counts.Ready > 0 && <View style={styles.notificationDot} />}
+          {unreadCount > 0 && (
+            <View style={styles.bellBadge}>
+              <Text style={styles.bellBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -187,6 +194,49 @@ export default function ServesScreen() {
           })}
         </ScrollView>
       </View>
+
+      {/* Stuck orders banner */}
+      {counts.Pending > 0 && !ordersLoading && (
+        <View style={styles.stuckBanner}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.stuckBannerTitle}>⚠️ {counts.Pending} stuck order{counts.Pending > 1 ? 's' : ''} at Pending</Text>
+            <Text style={styles.stuckBannerSub}>Orders pending over 30 min can be cleared</Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.stuckClearBtn, clearing && { opacity: 0.6 }]}
+            onPress={async () => {
+              if (clearing) return;
+              Alert.alert(
+                'Clear Stuck Orders',
+                `This will mark all ${counts.Pending} stuck Pending order(s) as voided and free their tables. Continue?`,
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Clear All',
+                    style: 'destructive',
+                    onPress: async () => {
+                      setClearing(true);
+                      const count = await clearStuckOrders();
+                      setClearing(false);
+                      if (count > 0) {
+                        Alert.alert('Done', `${count} stuck order(s) cleared and tables freed.`);
+                      } else {
+                        Alert.alert('None Found', 'No orders were stuck for over 30 minutes.');
+                      }
+                    },
+                  },
+                ]
+              );
+            }}
+            activeOpacity={0.8}
+          >
+            {clearing
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Text style={styles.stuckClearBtnText}>Clear Stuck</Text>
+            }
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Loading */}
       {ordersLoading && (
@@ -231,6 +281,25 @@ const styles = StyleSheet.create({
     width: 10, height: 10, borderRadius: 5,
     backgroundColor: '#ef4444', borderWidth: 2, borderColor: '#f4ebe1',
   },
+  bellBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#ef4444',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#fdfaf5',
+  },
+  bellBadgeText: {
+    fontFamily: 'LexendBold',
+    fontSize: 10,
+    color: '#ffffff',
+  },
   headerTitle: { fontFamily: 'LexendBold', fontSize: 20, color: '#1c120f' },
   filtersWrapper: { marginBottom: 20 },
   filtersContainer: { paddingHorizontal: 20, gap: 12 },
@@ -263,4 +332,29 @@ const styles = StyleSheet.create({
   actionBtnText: { fontFamily: 'LexendBold', fontSize: 16, color: '#ffffff' },
   emptyContainer: { paddingTop: 60, alignItems: 'center' },
   emptyText: { fontFamily: 'Lexend', fontSize: 16, color: '#8a7465' },
+  stuckBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fef3c7',
+    borderWidth: 1,
+    borderColor: '#fcd34d',
+    borderRadius: 12,
+    marginHorizontal: 20,
+    marginBottom: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    gap: 10,
+  },
+  stuckBannerTitle: { fontFamily: 'LexendBold', fontSize: 13, color: '#92400e' },
+  stuckBannerSub: { fontFamily: 'Lexend', fontSize: 11, color: '#b45309', marginTop: 2 },
+  stuckClearBtn: {
+    backgroundColor: '#d97706',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stuckClearBtnText: { fontFamily: 'LexendBold', fontSize: 13, color: '#ffffff' },
 });

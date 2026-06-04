@@ -28,6 +28,7 @@ type DiscountItem = {
 
 export default function RevenueDashboard() {
   const [activeFilter, setActiveFilter] = useState<FilterType>('Today');
+  const [discountFilter, setDiscountFilter] = useState<FilterType>('Today');
   const [allOrders, setAllOrders] = useState<OrderData[]>([]);
   const [loading, setLoading] = useState(true);
   const { voidDiscountLog, fetchDiscounts } = useReportsStore();
@@ -65,23 +66,27 @@ export default function RevenueDashboard() {
     }, [])
   );
 
-  // ── Date Filtering ──
+  // ── Date Filtering (Receipts) ──
   const now = new Date();
-  let startDate = new Date();
-  startDate.setHours(0, 0, 0, 0);
-  let endDate = new Date();
-  endDate.setHours(23, 59, 59, 999);
 
-  if (activeFilter === 'Yesterday') {
-    startDate.setDate(now.getDate() - 1);
-    endDate.setDate(now.getDate() - 1);
-  } else if (activeFilter === 'This Week') {
-    const day = now.getDay();
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
-    startDate.setDate(diff);
-  } else if (activeFilter === 'This Month') {
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+  function buildDateRange(filter: FilterType): { start: Date; end: Date } {
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const end   = new Date(); end.setHours(23, 59, 59, 999);
+    if (filter === 'Yesterday') {
+      start.setDate(start.getDate() - 1);
+      end.setDate(end.getDate() - 1);
+    } else if (filter === 'This Week') {
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+      start.setDate(diff);
+    } else if (filter === 'This Month') {
+      start.setDate(1);
+    }
+    return { start, end };
   }
+
+  const { start: startDate, end: endDate } = buildDateRange(activeFilter);
+  const { start: discStartDate, end: discEndDate } = buildDateRange(discountFilter);
 
   const filteredOrders = allOrders.filter(o => {
     const d = new Date(o.created_at);
@@ -238,42 +243,66 @@ export default function RevenueDashboard() {
               
             </View>
 
-            {/* Discounts Log — orders that had discounts applied */}
+            {/* Discounts Log */}
             <Text style={styles.sectionTitle}>Discounts Log</Text>
-            <View style={styles.listContainer}>
-              {voidDiscountLog.filter(r => r.type === 'discount').length > 0
-                ? voidDiscountLog
-                    .filter(r => r.type === 'discount')
-                    .map((record, i, arr) => {
-                      const timeStr = record.timestamp
-                        ? new Date(record.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
-                        : '--:--';
-                      const isLast = i === arr.length - 1;
-                      return (
-                        <View key={record.id} style={[styles.listItem, isLast && { borderBottomWidth: 0 }]}>
-                          <View style={styles.listLeft}>
-                            <Text style={styles.listMain} numberOfLines={2}>{record.itemName}</Text>
-                            <View style={styles.badgeRow}>
-                              <View style={[styles.badge, styles.badgeDiscount]}>
-                                <Text style={[styles.badgeText, styles.badgeTextDiscount]}>DISCOUNT</Text>
-                              </View>
-                              <Text style={styles.listSub} numberOfLines={1}>{record.reason} • Auth: {record.auth}</Text>
-                            </View>
-                          </View>
-                          <View style={styles.listRight}>
-                            <Text style={[styles.listMain, { color: '#059669' }]}>-KES {record.amount.toLocaleString()}</Text>
-                            <Text style={styles.listSub}>{timeStr}</Text>
-                          </View>
-                        </View>
-                      );
-                    })
-                : (
-                  <View style={{ padding: 20, alignItems: 'center' }}>
-                    <Text style={styles.listSub}>No discounts logged this session.</Text>
-                  </View>
-                )
-              }
+
+            {/* Discount date filter chips */}
+            <View style={{ marginBottom: 14 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersRowScroll}>
+                {(['Today', 'Yesterday', 'This Week', 'This Month'] as FilterType[]).map((f) => (
+                  <TouchableOpacity
+                    key={f}
+                    style={[styles.filterChip, discountFilter === f && styles.filterChipActive]}
+                    onPress={() => setDiscountFilter(f)}
+                  >
+                    <Text style={[styles.filterText, discountFilter === f && styles.filterTextActive]}>{f}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             </View>
+
+            <View style={styles.listContainer}>
+              {(() => {
+                const filtered = voidDiscountLog
+                  .filter(r => r.type === 'discount')
+                  .filter(r => {
+                    if (!r.timestamp) return false;
+                    const d = new Date(r.timestamp);
+                    return d >= discStartDate && d <= discEndDate;
+                  });
+                if (filtered.length === 0) {
+                  return (
+                    <View style={{ padding: 20, alignItems: 'center' }}>
+                      <Text style={styles.listSub}>No discounts for this period.</Text>
+                    </View>
+                  );
+                }
+                return filtered.map((record, i, arr) => {
+                  const timeStr = record.timestamp
+                    ? new Date(record.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+                    : '--:--';
+                  const isLast = i === arr.length - 1;
+                  return (
+                    <View key={record.id} style={[styles.listItem, isLast && { borderBottomWidth: 0 }]}>
+                      <View style={styles.listLeft}>
+                        <Text style={styles.listMain} numberOfLines={2}>{record.itemName}</Text>
+                        <View style={styles.badgeRow}>
+                          <View style={[styles.badge, styles.badgeDiscount]}>
+                            <Text style={[styles.badgeText, styles.badgeTextDiscount]}>DISCOUNT</Text>
+                          </View>
+                          <Text style={styles.listSub} numberOfLines={1}>{record.reason} • Auth: {record.auth}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.listRight}>
+                        <Text style={[styles.listMain, { color: '#059669' }]}>-KES {record.amount.toLocaleString()}</Text>
+                        <Text style={styles.listSub}>{timeStr}</Text>
+                      </View>
+                    </View>
+                  );
+                });
+              })()}
+            </View>
+
 
             <View style={{ height: 40 }} />
           </ScrollView>

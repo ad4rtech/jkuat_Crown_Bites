@@ -46,6 +46,7 @@ export default function CashierNotificationsScreen() {
           <X size={22} color="#1c120f" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Cashier Alerts {unreadCount > 0 && `(${unreadCount})`}</Text>
+        <View style={styles.closeBtn} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -118,6 +119,8 @@ const styles = StyleSheet.create({
     fontFamily: 'LexendBold',
     fontSize: 20,
     color: '#1c120f',
+    flex: 1,
+    textAlign: 'center',
   },
   scrollContent: {
     paddingHorizontal: 20,

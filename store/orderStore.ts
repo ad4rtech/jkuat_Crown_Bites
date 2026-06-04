@@ -54,6 +54,7 @@ interface OrderStore {
 
   // Submit
   submitOrder: (tableId: string) => Promise<{ orderId: string } | null>;
+  clearStuckOrders: () => Promise<number>; // returns count of orders cleared
 }
 
 export const useOrderStore = create<OrderStore>((set, get) => ({
@@ -212,29 +213,22 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
       .order('created_at', { ascending: false });
 
     if (filter === 'Today') {
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-      query = query.gte('created_at', startOfToday.toISOString());
+      const s = new Date(); s.setHours(0, 0, 0, 0);
+      const e = new Date(); e.setHours(23, 59, 59, 999);
+      // toISOString() correctly converts local-midnight to UTC for Supabase
+      query = query.gte('created_at', s.toISOString()).lte('created_at', e.toISOString());
     } else if (filter === 'Yesterday') {
-      const startOfYesterday = new Date();
-      startOfYesterday.setDate(startOfYesterday.getDate() - 1);
-      startOfYesterday.setHours(0, 0, 0, 0);
-      
-      const endOfYesterday = new Date();
-      endOfYesterday.setDate(endOfYesterday.getDate() - 1);
-      endOfYesterday.setHours(23, 59, 59, 999);
-      
-      query = query.gte('created_at', startOfYesterday.toISOString()).lte('created_at', endOfYesterday.toISOString());
+      const s = new Date(); s.setDate(s.getDate() - 1); s.setHours(0, 0, 0, 0);
+      const e = new Date(); e.setDate(e.getDate() - 1); e.setHours(23, 59, 59, 999);
+      query = query.gte('created_at', s.toISOString()).lte('created_at', e.toISOString());
     } else if (filter === 'This Week') {
-      const startOfWeek = new Date();
-      startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay()); // Sunday
-      startOfWeek.setHours(0, 0, 0, 0);
-      query = query.gte('created_at', startOfWeek.toISOString());
+      const s = new Date();
+      s.setDate(s.getDate() - s.getDay()); // back to Sunday
+      s.setHours(0, 0, 0, 0);
+      query = query.gte('created_at', s.toISOString());
     } else if (filter === 'This Month') {
-      const startOfMonth = new Date();
-      startOfMonth.setDate(1);
-      startOfMonth.setHours(0, 0, 0, 0);
-      query = query.gte('created_at', startOfMonth.toISOString());
+      const s = new Date(); s.setDate(1); s.setHours(0, 0, 0, 0);
+      query = query.gte('created_at', s.toISOString());
     }
 
     const { data, error } = await query;
@@ -359,4 +353,43 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
 
   hiddenOrderIds: [],
   clearPaidOrders: () => set(state => ({ hiddenOrderIds: [...state.hiddenOrderIds, ...state.paidOrders.map(o => o.id)] })),
+
+  clearStuckOrders: async () => {
+    if (!isSupabaseConfigured) return 0;
+
+    // Fetch all orders that are stuck at Pending (unpaid, over 30 minutes old)
+    const cutoff = new Date();
+    cutoff.setMinutes(cutoff.getMinutes() - 30);
+
+    const { data: stuckOrders, error } = await supabase
+      .from('orders')
+      .select('id, table_id')
+      .eq('status', 'Pending')
+      .eq('payment_status', 'unpaid')
+      .lte('created_at', cutoff.toISOString());
+
+    if (error || !stuckOrders || stuckOrders.length === 0) return 0;
+
+    const orderIds = stuckOrders.map((o: any) => o.id);
+    const tableIds = [...new Set(stuckOrders.map((o: any) => o.table_id))] as string[];
+
+    // Mark all stuck orders as Served + Voided
+    await supabase
+      .from('orders')
+      .update({ status: 'Served', payment_status: 'paid', payment_method: 'Voided' })
+      .in('id', orderIds);
+
+    // Free the associated tables
+    if (tableIds.length > 0) {
+      await supabase
+        .from('tables')
+        .update({ status: 'available' })
+        .in('id', tableIds);
+    }
+
+    // Refresh local state
+    await get().fetchActiveOrders();
+
+    return stuckOrders.length;
+  },
 }));

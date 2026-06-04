@@ -9,7 +9,6 @@ import { Clock, ChevronRight, X, Check, Flag, TrendingUp, AlertTriangle, BarChar
 import { useBillingStore, AuthRequest } from '../../store/billingStore';
 import { useOrderStore, ActiveOrderWithItems } from '../../store/orderStore';
 import SalesAnalytics from './SalesAnalytics';
-import { useTableStore } from '../../store/tableStore';
 import { useBillingConfigStore, computeBill } from '../../store/billingConfigStore';
 import { useReportsStore } from '../../store/reportsStore';
 import CenterToast, { useToast } from '../CenterToast';
@@ -112,7 +111,6 @@ const auth = StyleSheet.create({
 // ─── Transaction Row ───────────────────────────────────────────────────────────────
 function TxRow({ order, index, onPaid, confirm }: { order: ActiveOrderWithItems; index: number; onPaid: (tbl: string, amt: number) => void; confirm: any }) {
   const { markPaid } = useOrderStore();
-  const { resetTable } = useTableStore();
   const { serviceChargeRate, serviceChargeEnabled } = useBillingConfigStore();
   const { recordDiscount } = useReportsStore();
 
@@ -145,7 +143,7 @@ function TxRow({ order, index, onPaid, confirm }: { order: ActiveOrderWithItems;
             order.table_id,
           );
         }
-        markPaid(order.id, order.table_id, order.payment_method || 'Cash', grandTotal, resetTable);
+        markPaid(order.id, order.table_id, order.payment_method || 'Cash', grandTotal);
         onPaid(tableLabel(order.table_id), grandTotal);
       }
     });
@@ -185,7 +183,6 @@ const tx_ = StyleSheet.create({
 export default function BillingDashboard() {
   const { authRequests, fetchAuthRequests, subscribeToAuthRequests } = useBillingStore();
   const { activeOrders, paidOrders, fetchActiveOrders, fetchPaidOrders, subscribeToOrders } = useOrderStore();
-  const { fetchTables } = useTableStore();
   const { toast, show, confirm } = useToast();
 
   const [showSalesAnalytics, setShowSalesAnalytics] = useState(false);
@@ -212,7 +209,6 @@ export default function BillingDashboard() {
     fetchAuthRequests();
     fetchActiveOrders();
     fetchPaidOrders('Today');
-    fetchTables();
     const unsubAuth  = subscribeToAuthRequests();
     const unsubOrders = subscribeToOrders();
     return () => { unsubAuth(); unsubOrders(); };
@@ -304,18 +300,20 @@ export default function BillingDashboard() {
           </Animated.View>
         )}
 
-        {/* Active Transactions */}
+        {/* Active Transactions — unpaid only */}
         <Animated.View entering={FadeInDown.delay(180).duration(380)}>
           <Text style={styles.sectionTitle}>Active Transactions</Text>
-          {activeOrders.length === 0 ? (
+          {activeOrders.filter(o => o.payment_status !== 'paid').length === 0 ? (
             <View style={styles.emptyTx}>
-              <Text style={styles.emptyTxText}>No active transactions.</Text>
+              <Text style={styles.emptyTxText}>No active transactions right now.</Text>
             </View>
           ) : (
             <View style={styles.txCard}>
-              {activeOrders.map((order, i) => (
-                <TxRow key={order.id} order={order} index={i} onPaid={handlePaid} confirm={confirm} />
-              ))}
+              {activeOrders
+                .filter(o => o.payment_status !== 'paid')
+                .map((order, i) => (
+                  <TxRow key={order.id} order={order} index={i} onPaid={handlePaid} confirm={confirm} />
+                ))}
             </View>
           )}
         </Animated.View>

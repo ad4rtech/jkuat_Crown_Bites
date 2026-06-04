@@ -167,11 +167,14 @@ export default function ReceiptsHistory() {
   const [query, setQuery] = useState('');
   const [reprintedIds, setReprintedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dateFilter, setDateFilter] = useState<'All' | 'Today' | 'Yesterday' | 'This Week' | 'This Month'>('Today');
 
+  // Fetch on first focus
   useFocusEffect(
     useCallback(() => {
-      fetchPaidOrders('Today').finally(() => setLoading(false));
-    }, [])
+      setLoading(true);
+      fetchPaidOrders(dateFilter).finally(() => setLoading(false));
+    }, [dateFilter])
   );
 
   const filtered = useMemo(() => {
@@ -327,6 +330,24 @@ export default function ReceiptsHistory() {
 
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
 
+      {/* Date filter chips */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterScroll}
+        contentContainerStyle={styles.filterContent}
+      >
+        {(['All', 'Today', 'Yesterday', 'This Week', 'This Month'] as const).map((f) => (
+          <TouchableOpacity
+            key={f}
+            style={[styles.filterChip, dateFilter === f && styles.filterChipActive]}
+            onPress={() => { setDateFilter(f); setQuery(''); }}
+          >
+            <Text style={[styles.filterChipText, dateFilter === f && styles.filterChipTextActive]}>{f}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
       {/* Search bar */}
       <Animated.View entering={FadeIn.duration(350)} style={styles.searchBar}>
         <Search size={16} color="#8a7465" />
@@ -401,6 +422,14 @@ export default function ReceiptsHistory() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#faf5ef' },
   scroll: { padding: 16, paddingBottom: 100 },
+
+  // Date filter chips
+  filterScroll: { marginBottom: 14 },
+  filterContent: { flexDirection: 'row', gap: 10, paddingRight: 16 },
+  filterChip: { paddingHorizontal: 18, paddingVertical: 9, borderRadius: 20, backgroundColor: '#f0e6d8', borderWidth: 1, borderColor: '#e8ddd4' },
+  filterChipActive: { backgroundColor: '#2a1e1a', borderColor: '#2a1e1a' },
+  filterChipText: { fontFamily: 'LexendSemiBold', fontSize: 13, color: '#705f55' },
+  filterChipTextActive: { color: '#ffffff' },
 
   searchBar: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#fff', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 22, borderWidth: 1, borderColor: '#f0e6d8', elevation: 1, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 4, shadowOffset: { width: 0, height: 1 } },
   searchInput: { flex: 1, fontFamily: 'Lexend', fontSize: 14, color: '#1c120f', padding: 0 },
